@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io;
+use std::io::BufRead;
 use std::io::Write;
 
 const STDENV: &str = r#"
@@ -52,18 +53,29 @@ impl cpq
 cimpl bpq
 nonimpl lpq
 cnonimpl mpq
+
+drop -
+dup -'.'
+over --'.''.'
+swap --''.'
+rot ---''.'''.'
+
+2drop --
+2dup --'.''.'.''
+2over ----'.''.'''.''''.'.''
+2swap ----'''.''''.'.''
 "#;
 
 #[derive(Debug, PartialEq)]
 struct Values {
-    inputs: i32,
+    inputs: usize,
     values: Vec<Vec<bool>>,
 }
 
 impl Values {
-    fn genvalues(inputs: i32) -> Values {
+    fn genvalues(inputs: usize) -> Values {
         let mut values = Vec::new();
-        for ic in (0..2_i32.pow(inputs.try_into().unwrap())).rev() {
+        for ic in (0..2_usize.pow(inputs.try_into().unwrap())).rev() {
             let mut vaules = Vec::new();
             for ac in (0..inputs).rev() {
                 vaules.push((ic >> ac) % 2 == 1);
@@ -86,12 +98,12 @@ fn asbool(s: &char) -> Option<bool> {
 
 #[derive(Debug, PartialEq)]
 struct Func {
-    inputs: i32,
+    inputs: usize,
     values: Vec<bool>,
 }
 
 impl Func {
-    fn from_expr(s: &str) -> Option<Self> {
+    fn from_str(s: &str) -> Option<Self> {
         let mut values = Vec::new();
         let mut u = s.len();
         let mut inputs = 0;
@@ -114,7 +126,7 @@ impl Func {
     fn eval(&self, stack: &mut Stack) -> Option<Stack> {
         let gen = Values::genvalues(self.inputs);
         let mut ret = Vec::new();
-        let uinputs: usize = self.inputs.try_into().unwrap();
+        let uinputs: usize = self.inputs;
         if stack.len() < uinputs {
             return None;
         }
@@ -128,9 +140,69 @@ impl Func {
     }
 }
 
+fn fmt_func(values: &Vec<bool>) -> String {
+    let mut st = String::new();
+    let mut i: usize = 0;
+    for val in values {
+        i += 1;
+        if i == 5 {
+            st.push('.');
+            i = 0;
+        }
+
+        if *val {
+            st.push('t');
+        } else {
+            st.push('f');
+        }
+    }
+    return st;
+}
+
+#[derive(Debug, PartialEq)]
+struct StackC {
+    inputs: usize,
+    outputs: usize,
+    values: Vec<usize>,
+}
+
+impl StackC {
+    fn from_str(s: &str) -> Option<StackC> {
+        let inputs = s.matches("-").count();
+        if inputs <= 0 || inputs + s.matches(".").count() + s.matches("'").count() != s.len() {
+            return None;
+        }
+        let es = &s[inputs..];
+        let mut values = Vec::new();
+        for u in es.split(".") {
+            if u.len() > 0 {
+                values.push(u.len() - 1);
+            }
+        }
+        return Some(StackC {
+            inputs,
+            outputs: values.len(),
+            values,
+        });
+    }
+    fn eval(&self, stack: &mut Stack) -> Option<Stack> {
+        let mut ret = Vec::new();
+        let uinputs: usize = self.inputs;
+        if stack.len() < uinputs {
+            return None;
+        }
+        let input = stack.split_off(stack.len() - uinputs);
+        for val in &self.values {
+            ret.push(input[val - 0])
+        }
+        return Some(ret);
+    }
+}
+
 #[derive(Debug)]
 enum Expr {
     F(Func),
+    C(StackC),
 }
 
 #[derive(Debug)]
@@ -140,28 +212,49 @@ impl Expression {
     fn eval_str(spx: &str, dict: &Dictionary) -> Option<Expression> {
         let mut v = Vec::new();
         for sx in spx.split_whitespace() {
-            v.push(Expr::F(Func::from_expr(&dict.try_find(sx.to_owned()))?));
+            let word = dict.try_find(sx.to_owned());
+            let f = Func::from_str(&word).map(Expr::F);
+            let c = StackC::from_str(&word).map(Expr::C);
+            v.push(f.or(c)?);
         }
-        dbg!(&v);
         return Some(Expression(v));
     }
-    fn count_inputs(&self) -> i32 {
-        let mut i = 1;
+    fn count_inputs(&self) -> usize {
+        let mut i: i32 = 0;
+        let mut mi: i32 = 0;
         for sx in &self.0 {
+            let inputs: i32;
+            let outputs: i32;
             match sx {
-                Expr::F(f) => i = i + f.inputs - 1,
+                Expr::F(f) => {
+                    inputs = f.inputs.try_into().unwrap();
+                    outputs = 1;
+                }
+                Expr::C(f) => {
+                    inputs = f.inputs.try_into().unwrap();
+                    outputs = f.outputs.try_into().unwrap();
+                }
             }
+            i = i + inputs;
+            if i > mi {
+                mi = i;
+            }
+            i = i - outputs;
         }
-        return i;
+        return mi.try_into().unwrap();
     }
     fn eval_expr(&self, mut stack: Stack) -> Option<Stack> {
         for sx in &self.0 {
+            let mut res;
             match sx {
                 Expr::F(f) => {
-                    let mut res = f.eval(&mut stack)?;
-                    stack.append(&mut res);
+                    res = f.eval(&mut stack)?;
+                }
+                Expr::C(f) => {
+                    res = f.eval(&mut stack)?;
                 }
             }
+            stack.append(&mut res);
         }
         return Some(stack);
     }
@@ -173,11 +266,11 @@ fn fmt_stack(stack: &Vec<bool>) -> String {
     let mut st = String::new();
     let mut s = false;
     for b in stack {
-        st.push_str(&b.to_string());
         if s {
             st.push_str(" ");
-            s = true;
         }
+        s = true;
+        st.push_str(&b.to_string());
     }
     return st;
 }
@@ -198,18 +291,13 @@ impl Dictionary {
     }
     fn try_find(&self, q: String) -> String {
         let mut qa = q;
-        let mut c = false;
         loop {
             match self.0.get(&qa) {
                 Some(v) => {
-                    println!("{} = {}", qa, v);
-                    c = true;
+                    println!("({} = {})", qa, v);
                     qa = v.to_owned();
                 }
                 None => {
-                    if c {
-                        println!("");
-                    }
                     return qa;
                 }
             }
@@ -219,32 +307,36 @@ impl Dictionary {
 
 pub fn repl() {
     let dictionary = Dictionary::new_stdenv();
-    let mut buffer = String::new();
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    loop {
-        print!("$ ");
-        stdout.flush().unwrap();
-        buffer.clear();
-        let _u = stdin.read_line(&mut buffer).unwrap();
-        match Expression::eval_str(&buffer, &dictionary) {
+    for line in stdin.lock().lines() {
+        let line = line.unwrap();
+        println!("> {}", line);
+        if line == "?" {
+            println!("{}", STDENV);
+        }
+        match Expression::eval_str(&line, &dictionary) {
             Some(expr) => match expr.eval_expr(Stack::new()) {
                 Some(stack) => {
                     println!("{}", fmt_stack(&stack));
-                    continue;
                 }
                 _ => {
                     let input = expr.count_inputs();
-                    dbg!(input);
+                    dbg!(&expr);
+                    dbg!(&input);
                     let values = Values::genvalues(input);
                     let mut res = Vec::new();
                     for v in values.values {
-                        res.push(expr.eval_expr(v).unwrap());
+                        match expr.eval_expr(v) {
+                            Some(e) => res.push(e[0]),
+                            None => println!("...?"),
+                        }
                     }
-                    dbg!(res);
+                    println!("{}", fmt_func(&res));
                 }
             },
             _ => println!("?"),
         }
+        stdout.flush().unwrap();
     }
 }
