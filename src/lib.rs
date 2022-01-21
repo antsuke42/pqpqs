@@ -7,52 +7,27 @@ const STDENV: &str = r#"
 true t
 false f
 
-op ff
-np ft
-lp tf
-vp tt
+lf ff
+not ft
+id tf
+lt tt
 
-id lp
-not np
-neg not
-lt vp
-ltrue lt
-lf op
-lfalse lf
-
-opq ffff
-xpq ffft
-mpq fftf
-fpq fftt
-lpq ftff
-gpq ftft
-jpq fttf
-dpq fttt
-kpq tfff
-epq tfft
-hpq tftf
-cpq tftt
-ipq ttff
-bpq ttft
-apq tttf
-vpq tttt
-
-cont opq
-taut vpq
-nor xpq
-xor jpq
-nand dpq
-and kpq
-xnor epq
-or apq
-p ipq
-q hpq
-pneg fpq
-qneg gpq
-impl cpq
-cimpl bpq
-nonimpl lpq
-cnonimpl mpq
+cont ffff
+nor ffft
+cnonimpl fftf
+pneg fftt
+nonimpl ftff
+qneg ftft
+xor fttf
+nand fttt
+and tfff
+xnor tfft
+q tftf
+impl tftt
+p ttff
+cimpl ttft
+or tttf
+taut tttt
 
 drop -
 dup -'.'
@@ -219,9 +194,10 @@ impl Expression {
         }
         return Some(Expression(v));
     }
-    fn count_inputs(&self) -> usize {
+    fn count_io(&self) -> (usize, usize) {
         let mut i: i32 = 0;
         let mut mi: i32 = 0;
+        let mut o: i32 = 0;
         for sx in &self.0 {
             let inputs: i32;
             let outputs: i32;
@@ -236,12 +212,17 @@ impl Expression {
                 }
             }
             i = i + inputs;
+            o = o - inputs;
+            if o < 0 {
+                o = 0;
+            }
             if i > mi {
                 mi = i;
             }
             i = i - outputs;
+            o = o + outputs;
         }
-        return mi.try_into().unwrap();
+        return (mi.try_into().unwrap(), o.try_into().unwrap());
     }
     fn eval_expr(&self, mut stack: Stack) -> Option<Stack> {
         for sx in &self.0 {
@@ -316,25 +297,43 @@ pub fn repl() {
             println!("{}", STDENV);
         }
         match Expression::eval_str(&line, &dictionary) {
-            Some(expr) => match expr.eval_expr(Stack::new()) {
-                Some(stack) => {
-                    println!("{}", fmt_stack(&stack));
-                }
-                _ => {
-                    let input = expr.count_inputs();
-                    dbg!(&expr);
-                    dbg!(&input);
+            Some(expr) => {
+                let (input, o) = expr.count_io();
+                if input == 0 {
+                    match expr.eval_expr(Stack::new()) {
+                        Some(stack) => println!("{}", fmt_stack(&stack)),
+                        None => println!("???"),
+                    }
+                } else {
+                    if o > 1 {
+                        println!("... ({})", o);
+                        continue;
+                    }
                     let values = Values::genvalues(input);
                     let mut res = Vec::new();
                     for v in values.values {
                         match expr.eval_expr(v) {
                             Some(e) => res.push(e[0]),
-                            None => println!("...?"),
+                            None => {
+                                println!("...?");
+                                continue;
+                            }
                         }
                     }
                     println!("{}", fmt_func(&res));
                 }
+            } /*
+            match expr.eval_expr(Stack::new()) {
+            Some(stack) => {
+            println!("{}", fmt_stack(&stack));
+            }
+            _ => {
+            let (input, o) = expr.count_io();
+            }
+            }
+            }
             },
+             */
             _ => println!("?"),
         }
         stdout.flush().unwrap();
