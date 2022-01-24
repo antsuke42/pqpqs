@@ -1,7 +1,6 @@
+use rustyline::error::ReadlineError;
+use rustyline::Editor;
 use std::collections::HashMap;
-use std::io;
-use std::io::BufRead;
-use std::io::Write;
 
 const STDENV: &str = r#"
 true t
@@ -29,16 +28,16 @@ cimpl ttft
 or tttf
 taut tttt
 
-drop -
-dup -'.'
-over --'.''.'
-swap --''.'
-rot ---''.'''.'
+drop #
 
-2drop --
-2dup --'.''.'.''
-2over ----'.''.'''.''''.'.''
-2swap ----'''.''''.'.''
+dup '
+over '-
+2dup ''
+2over ''--
+
+swap -*
+2swap --**
+rot -**
 "#;
 
 #[derive(Debug, PartialEq)]
@@ -138,39 +137,81 @@ fn fmt_func(values: &Vec<bool>) -> String {
 struct StackC {
     inputs: usize,
     outputs: usize,
-    values: Vec<usize>,
+    values: Vec<SC>,
+}
+
+#[derive(Debug, PartialEq)]
+enum SC {
+    Take,
+    Over,
+    Swap,
+    Drop,
 }
 
 impl StackC {
     fn from_str(s: &str) -> Option<StackC> {
-        let inputs = s.matches("-").count();
-        if inputs <= 0 || inputs + s.matches(".").count() + s.matches("'").count() != s.len() {
+        let inputs = s.len();
+        if inputs <= 0 || s.chars().filter(|&x| "-'*#".contains(x)).count() != inputs {
             return None;
         }
-        let es = &s[inputs..];
         let mut values = Vec::new();
-        for u in es.split(".") {
-            if u.len() > 0 {
-                values.push(u.len() - 1);
-            }
+        let mut outputs = 0;
+        for u in s.chars() {
+            values.push(match u {
+                '-' => {
+                    outputs += 1;
+                    SC::Take
+                }
+                '\'' => {
+                    outputs += 2;
+                    SC::Over
+                }
+                '*' => {
+                    outputs += 1;
+                    SC::Swap
+                }
+                '#' => SC::Drop,
+                _ => {
+                    return None;
+                }
+            })
         }
         return Some(StackC {
             inputs,
-            outputs: values.len(),
+            outputs,
             values,
         });
     }
     fn eval(&self, stack: &mut Stack) -> Option<Stack> {
-        let mut ret = Vec::new();
         let uinputs: usize = self.inputs;
         if stack.len() < uinputs {
             return None;
         }
         let input = stack.split_off(stack.len() - uinputs);
-        for val in &self.values {
-            ret.push(input[val - 0])
+
+        let mut main = Vec::new();
+        let mut over = Vec::new();
+        let mut swap = Vec::new();
+
+        for (i, val) in self.values.iter().enumerate() {
+            match val {
+                SC::Take => {
+                    main.push(input[i]);
+                }
+                SC::Over => {
+                    main.push(input[i]);
+                    over.push(input[i]);
+                }
+                SC::Swap => {
+                    swap.push(input[i]);
+                }
+                SC::Drop => {}
+            }
         }
-        return Some(ret);
+        swap.append(&mut main);
+        swap.append(&mut over);
+
+        return Some(swap);
     }
 }
 
@@ -288,54 +329,60 @@ impl Dictionary {
 
 pub fn repl() {
     let dictionary = Dictionary::new_stdenv();
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    for line in stdin.lock().lines() {
-        let line = line.unwrap();
-        println!("> {}", line);
-        if line == "?" {
-            println!("{}", STDENV);
+
+    let mut rl = Editor::<()>::new();
+    loop {
+        let readline = rl.readline("> ");
+        match readline {
+            Ok(line) => {
+                rl.add_history_entry(line.as_str());
+                eval(&line, &dictionary);
+            }
+            Err(ReadlineError::Interrupted) => {
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                break;
+            }
+            Err(err) => {
+                println!("{:?}", err);
+                break;
+            }
         }
-        match Expression::eval_str(&line, &dictionary) {
-            Some(expr) => {
-                let (input, o) = expr.count_io();
-                if input == 0 {
-                    match expr.eval_expr(Stack::new()) {
-                        Some(stack) => println!("{}", fmt_stack(&stack)),
-                        None => println!("???"),
-                    }
-                } else {
-                    if o > 1 {
-                        println!("... ({})", o);
-                        continue;
-                    }
-                    let values = Values::genvalues(input);
-                    let mut res = Vec::new();
-                    for v in values.values {
-                        match expr.eval_expr(v) {
-                            Some(e) => res.push(e[0]),
-                            None => {
-                                println!("...?");
-                                continue;
-                            }
+    }
+}
+
+fn eval(line: &str, dictionary: &Dictionary) {
+    if line == "?" {
+        println!("{}", STDENV);
+    }
+    match Expression::eval_str(&line, &dictionary) {
+        Some(expr) => {
+            let (input, o) = expr.count_io();
+            if input == 0 {
+                match expr.eval_expr(Stack::new()) {
+                    Some(stack) => println!("{}", fmt_stack(&stack)),
+                    None => println!("???"),
+                }
+            } else {
+                if o != 1 {
+                    println!("... ({})", o);
+                    return;
+                }
+                let values = Values::genvalues(input);
+                let mut res = Vec::new();
+                for v in values.values {
+                    match expr.eval_expr(v) {
+                        Some(e) => res.push(e[0]),
+                        None => {
+                            println!("...?");
+                            return;
                         }
                     }
-                    println!("{}", fmt_func(&res));
                 }
-            } /*
-            match expr.eval_expr(Stack::new()) {
-            Some(stack) => {
-            println!("{}", fmt_stack(&stack));
+                println!("{}", fmt_func(&res));
             }
-            _ => {
-            let (input, o) = expr.count_io();
-            }
-            }
-            }
-            },
-             */
-            _ => println!("?"),
         }
-        stdout.flush().unwrap();
+        _ => println!("?"),
     }
 }
