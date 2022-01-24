@@ -100,8 +100,11 @@ impl Func {
         return Some(Func { inputs, values });
     }
     fn eval(&self, stack: &mut Stack) -> Option<Stack> {
-        let gen = Values::genvalues(self.inputs);
         let mut ret = Vec::new();
+        if self.values.len() < 1 {
+            return Some(ret);
+        }
+        let gen = Values::genvalues(self.inputs);
         let uinputs: usize = self.inputs;
         if stack.len() < uinputs {
             return None;
@@ -230,7 +233,7 @@ impl Expression {
     fn eval_str(spx: &str, dict: &Dictionary) -> Option<Expression> {
         let mut v = Vec::new();
         for sx in spx.split_whitespace() {
-            let word = dict.try_find(sx.to_owned());
+            let word = dict.try_find(sx.replace(".", ""));
             let f = Func::from_str(&word).map(Expr::F);
             let c = StackC::from_str(&word).map(Expr::C);
             v.push(f.or(c)?);
