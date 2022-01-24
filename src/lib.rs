@@ -30,16 +30,17 @@ cimpl ttft
 or tttf
 taut tttt
 
-drop #
-
 dup '
 over '-
-2dup ''
-2over ''--
-
 swap -*
-2swap --**
 rot -**
+
+2over ''--
+2swap --**
+2dup ''
+
+drop #
+2drop ##
 "#;
 
 #[derive(Debug, PartialEq)]
