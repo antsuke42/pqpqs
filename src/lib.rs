@@ -3,6 +3,8 @@ use rustyline::Editor;
 use std::collections::HashMap;
 
 const STDENV: &str = r#"
+help ?
+
 true t
 false f
 
@@ -355,6 +357,7 @@ pub fn repl() {
 fn eval(line: &str, dictionary: &Dictionary) {
     if line == "?" {
         println!("{}", STDENV);
+        return;
     }
     match Expression::eval_str(&line, &dictionary) {
         Some(expr) => {
