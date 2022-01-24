@@ -355,7 +355,7 @@ pub fn repl() {
 }
 
 fn eval(line: &str, dictionary: &Dictionary) {
-    if line == "?" {
+    if line == "?" || line == "help" {
         println!("{}", STDENV);
         return;
     }
